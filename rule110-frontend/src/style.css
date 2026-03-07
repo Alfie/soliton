@@ -1,0 +1,394 @@
+/* ================================================================
+   style.css — Rule 110 on-chain demo
+   
+   Aesthetic: scientific instrument / phosphor terminal
+   - Deep background, amber accent, monospace throughout
+   - Canvas is the hero — everything else is chrome
+   - Subtle scanline overlay and glow effects for atmosphere
+   ================================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@300;400;500;600&display=swap');
+
+/* ================================================================
+   Design tokens
+   ================================================================ */
+
+:root {
+  --bg-base:       #07070d;
+  --bg-surface:    #0e0e1a;
+  --bg-raised:     #16162a;
+  --border:        #2a2a45;
+
+  --text-primary:  #e8e6d9;
+  --text-muted:    #6b6a7a;
+  --text-dim:      #3a3a55;
+
+  --amber:         #f0a500;
+  --amber-glow:    rgba(240, 165, 0, 0.15);
+  --amber-dim:     #7a5200;
+
+  --green:         #2dd46a;
+  --red:           #e85555;
+
+  --font-mono:     'Azeret Mono', 'Courier New', monospace;
+
+  --radius:        3px;
+  --transition:    150ms ease;
+}
+
+/* ================================================================
+   Reset & base
+   ================================================================ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ================================================================
+   App shell
+   ================================================================ */
+
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto auto auto auto 1fr;
+  grid-template-columns: 1fr;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 24px;
+  width: 100%;
+}
+
+/* ================================================================
+   Header
+   ================================================================ */
+
+.header {
+  padding: 32px 0 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+
+.header p {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.header p::before {
+  content: '//';
+  color: var(--amber);
+  margin-right: 8px;
+}
+
+/* ================================================================
+   Wallet panel
+   ================================================================ */
+
+.wallet-panel {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.wallet-panel::before {
+  content: 'WALLET';
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--text-dim);
+  min-width: 60px;
+}
+
+/* ================================================================
+   Controls
+   ================================================================ */
+
+.controls {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.controls::before {
+  content: 'INPUT';
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--text-dim);
+  min-width: 60px;
+}
+
+.generation-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+}
+
+/* ================================================================
+   TX Status
+   ================================================================ */
+
+.tx-status {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tx-status::before {
+  content: 'STATUS';
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  color: var(--text-dim);
+  min-width: 60px;
+}
+
+.pending {
+  color: var(--amber);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.confirmed {
+  color: var(--green);
+}
+
+.failed {
+  color: var(--red);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+/* ================================================================
+   Buttons
+   ================================================================ */
+
+button {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  padding: 8px 16px;
+  transition:
+    background var(--transition),
+    border-color var(--transition),
+    color var(--transition),
+    box-shadow var(--transition);
+  outline: none;
+  position: relative;
+}
+
+button:hover:not(:disabled) {
+  background: var(--bg-raised);
+  border-color: var(--amber);
+  color: var(--amber);
+  box-shadow: 0 0 12px var(--amber-glow);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Primary action — the Evolve button gets amber treatment */
+.controls button:not(:disabled) {
+  border-color: var(--amber-dim);
+}
+
+.controls button:hover:not(:disabled) {
+  border-color: var(--amber);
+  color: var(--amber);
+  box-shadow: 0 0 16px var(--amber-glow);
+}
+
+/* ================================================================
+   Pubkey display
+   ================================================================ */
+
+.pubkey {
+  font-size: 12px;
+  color: var(--green);
+  letter-spacing: 0.05em;
+  padding: 4px 10px;
+  border: 1px solid rgba(45, 212, 106, 0.25);
+  border-radius: var(--radius);
+  background: rgba(45, 212, 106, 0.05);
+}
+
+.pubkey::before {
+  content: '◉ ';
+  font-size: 8px;
+}
+
+/* ================================================================
+   Canvas — the hero element
+   ================================================================ */
+
+canvas#rule110-canvas {
+  display: block;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+
+  /* Enhanced phosphor glow */
+  box-shadow:
+    0 0 0 1px var(--bg-base),
+    0 0 32px rgba(240, 165, 0, 0.12),
+    0 0 64px rgba(240, 165, 0, 0.06),
+    inset 0 0 32px rgba(240, 165, 0, 0.03);
+
+  /* Smooth fade-in when canvas updates */
+  transition: opacity 150ms ease;
+}
+
+/* Wrap the canvas in a div with a scanline overlay */
+.canvas-wrapper {
+  position: relative;
+  margin: 32px 0;
+  max-height: 80vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-radius: var(--radius);
+  
+  /* Subtle inner shadow for depth */
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.canvas-wrapper canvas {
+  margin: 0;
+  display: block;
+}
+
+/* Scanline overlay effect */
+.canvas-wrapper::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.1) 2px,
+    rgba(0, 0, 0, 0.1) 4px
+  );
+  pointer-events: none;
+  border-radius: var(--radius);
+  opacity: 0.3;
+}
+
+/* ================================================================
+   Empty state — shown when no generations yet
+   ================================================================ */
+
+.canvas-empty {
+  margin: 32px 0;
+  height: 200px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* ================================================================
+   Scrollbar styling
+   ================================================================ */
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-base);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dim);
+}
+
+/* Canvas wrapper scrollbar with amber accent */
+.canvas-wrapper::-webkit-scrollbar-thumb {
+  background: var(--amber-dim);
+}
+
+.canvas-wrapper::-webkit-scrollbar-thumb:hover {
+  background: var(--amber);
+}
+
+/* ================================================================
+   Responsive
+   ================================================================ */
+
+@media (max-width: 600px) {
+  .app {
+    padding: 0 16px;
+  }
+
+  .header p {
+    font-size: 10px;
+  }
+
+  .wallet-panel::before,
+  .controls::before,
+  .tx-status::before {
+    display: none;
+  }
+}

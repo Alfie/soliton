@@ -1,0 +1,40 @@
+[workspace]
+members = ["."]
+resolver = "2"
+
+[package]
+name = "rule110-raw"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "rule110_raw"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
+borsh = { version = "1.4", features = ["derive"] }
+
+# MagicBlock ER SDK — anchor feature wires in the delegation macros
+ephemeral-rollups-sdk = { version = "0.8.6", features = ["anchor"] }
+
+# Local direct-consequence verifier — unchanged
+direct-consequence = { path = "../../direct-consequence-checker", default-features = false }
+
+[dev-dependencies]
+anchor-client    = "0.32.1"
+solana-sdk       = "2.2"
+tokio            = { version = "1", features = ["full"] }
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1

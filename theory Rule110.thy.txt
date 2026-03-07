@@ -1,0 +1,329 @@
+theory Rule110
+  imports Main
+begin
+
+(* ========================================================================
+   Rule110.thy  —  Formal verification of the Rule 110 cellular automaton
+   
+   Mirrors the Rust implementation in:
+     rule110-solana-raw/src/state.rs
+   
+   Structure (three layers):
+     1. rule110_lookup  — the 8-case lookup table            (this file)
+     2. next_gen        — single-step evolution              (this file)
+     3. verify_step     — soundness of the verifier          (this file)
+
+   The central theorem is:
+     verify_step_sound:
+       verify_step cs ns ⟹ ns = next_gen cs
+   
+   i.e. the verifier only accepts transitions that are correct Rule 110 steps.
+   ======================================================================== *)
+
+section ‹Preliminaries›
+
+(* A cell is a boolean.  A row is a list of booleans. *)
+type_synonym cell = bool
+type_synonym row  = "cell list"
+
+(* ========================================================================
+   Section 1 — The Rule 110 lookup table
+   ======================================================================== *)
+
+section ‹The Rule 110 lookup table›
+
+(* The neighborhood of a cell is a 3-bit natural number:
+     bit 2 = left neighbor
+     bit 1 = center cell
+     bit 0 = right neighbor
+   This mirrors the Rust `neighborhood` function:
+     (left << 2) | (center << 1) | right *)
+
+(* Rule 110 = 0b_0110_1110 = 110 in decimal.
+   Bit n of 110 gives the output for neighborhood n.
+   
+   n | left center right | output
+   --|---------------------|-------
+   0 |  0     0     0    |   0
+   1 |  0     0     1    |   1
+   2 |  0     1     0    |   1
+   3 |  0     1     1    |   1
+   4 |  1     0     0    |   0
+   5 |  1     0     1    |   1
+   6 |  1     1     0    |   1
+   7 |  1     1     1    |   0
+*)
+
+definition rule110_lookup :: "nat ⇒ bool" where
+  "rule110_lookup n =
+    (n = 1 ∨ n = 2 ∨ n = 3 ∨ n = 5 ∨ n = 6)" (* neighborhoods are 3-bit; anything ≥ 8 is unreachable *)
+
+(* Encode a 3-cell neighborhood as a natural number. *)
+definition encode_neighborhood :: "cell ⇒ cell ⇒ cell ⇒ nat" where
+  "encode_neighborhood l c r =
+    (if l then 4 else 0) +
+    (if c then 2 else 0) +
+    (if r then 1 else 0)"
+
+lemma encode_neighborhood_range:
+  "encode_neighborhood l c r < 8"
+  by (simp add: encode_neighborhood_def)
+
+(* Verify all 8 cases of the lookup table against the Rule 110 specification.
+   Each is a direct computation — Isabelle discharges these by evaluation. *)
+
+lemma rule110_000: "rule110_lookup (encode_neighborhood False False False) = False"
+  by (simp add: rule110_lookup_def encode_neighborhood_def)
+
+lemma rule110_001: "rule110_lookup (encode_neighborhood False False True)  = True"
+  by (simp add: rule110_lookup_def encode_neighborhood_def)
+
+lemma rule110_010: "rule110_lookup (encode_neighborhood False True  False) = True"
+  by (simp add: rule110_lookup_def encode_neighborhood_def)
+
+lemma rule110_011: "rule110_lookup (encode_neighborhood False True  True)  = True"
+  by (simp add: rule110_lookup_def encode_neighborhood_def)
+
+lemma rule110_100: "rule110_lookup (encode_neighborhood True  False False) = False"
+  by (simp add: rule110_lookup_def encode_neighborhood_def)
+
+lemma rule110_101: "rule110_lookup (encode_neighborhood True  False True)  = True"
+  by (simp add: rule110_lookup_def encode_neighborhood_def)
+
+lemma rule110_110: "rule110_lookup (encode_neighborhood True  True  False) = True"
+  by (simp add: rule110_lookup_def encode_neighborhood_def)
+
+lemma rule110_111: "rule110_lookup (encode_neighborhood True  True  True)  = False"
+  by (simp add: rule110_lookup_def encode_neighborhood_def)
+
+(* Bundle all 8 cases for convenient use later. *)
+lemmas rule110_all_cases =
+  rule110_000 rule110_001 rule110_010 rule110_011
+  rule110_100 rule110_101 rule110_110 rule110_111
+
+(* ========================================================================
+   Section 2 — Boundary conditions and cell access
+   ======================================================================== *)
+
+section ‹Boundary conditions and cell access›
+
+(* A CA configuration: the row plus fixed boundary values. *)
+record config =
+  cells         :: row
+  left_boundary :: cell
+  right_boundary :: cell
+
+(* Safe cell access — mirrors the Rust `get_bit` function.
+   Positions outside [0, width) return the boundary value. *)
+definition get_cell :: "config ⇒ int ⇒ cell" where
+  "get_cell cfg i =
+    (if i < 0 then left_boundary cfg
+     else if i ≥ int (length (cells cfg)) then right_boundary cfg
+     else cells cfg ! nat i)"
+
+(* The neighborhood of cell i in configuration cfg. *)
+definition neighborhood :: "config ⇒ int ⇒ nat" where
+  "neighborhood cfg i =
+    encode_neighborhood
+      (get_cell cfg (i - 1))
+      (get_cell cfg i)
+      (get_cell cfg (i + 1))"
+
+lemma neighborhood_range:
+  "neighborhood cfg i < 8"
+  by (simp add: neighborhood_def encode_neighborhood_range)
+
+(* ========================================================================
+   Section 3 — Single-step evolution
+   ======================================================================== *)
+
+section ‹Single-step evolution›
+
+(* The next state of cell i, given configuration cfg.
+   Mirrors `compute_next` in state.rs. *)
+definition next_cell :: "config ⇒ int ⇒ cell" where
+  "next_cell cfg i = rule110_lookup (neighborhood cfg i)"
+
+(* Evolve an entire row one generation.
+   Boundary conditions are preserved — only interior cells change. *)
+definition next_gen :: "config ⇒ row" where
+  "next_gen cfg = map (λi. next_cell cfg (int i)) [0..<length (cells cfg)]"
+
+(* The new configuration after one step — same boundary values, new cells. *)
+definition step :: "config ⇒ config" where
+  "step cfg = cfg ⦇ cells := next_gen cfg ⦈"
+
+(* Length is preserved by evolution. *)
+lemma next_gen_length [simp]:
+  "length (next_gen cfg) = length (cells cfg)"
+  by (simp add: next_gen_def)
+
+lemma step_preserves_width [simp]:
+  "length (cells (step cfg)) = length (cells cfg)"
+  by (simp add: step_def)
+
+(* ========================================================================
+   Section 4 — Cell-level correctness
+   ======================================================================== *)
+
+section ‹Cell-level correctness›
+
+(* The i-th cell of next_gen matches next_cell. *)
+lemma next_gen_nth:
+  assumes "i < length (cells cfg)"
+  shows   "next_gen cfg ! i = next_cell cfg (int i)"
+  by (simp add: next_gen_def assms)
+
+(* ========================================================================
+   Section 5 — verify_step and its soundness
+   ======================================================================== *)
+
+section ‹The verifier and its soundness›
+
+(* Verify that a single cell transition is consistent with Rule 110.
+   Mirrors `verify_cell` in the direct-consequence checker. *)
+definition verify_cell :: "cell ⇒ cell ⇒ cell ⇒ cell ⇒ bool" where
+  "verify_cell l c r out =
+    (rule110_lookup (encode_neighborhood l c r) = out)"
+
+(* Verify that every cell in ns is the correct Rule 110 successor
+   of the corresponding cell in cfg.
+   Mirrors `verify_step` in the direct-consequence checker. *)
+definition verify_step :: "config ⇒ row ⇒ bool" where
+  "verify_step cfg ns =
+    (length ns = length (cells cfg) ∧
+     (∀i < length (cells cfg).
+        verify_cell
+          (get_cell cfg (int i - 1))
+          (get_cell cfg (int i))
+          (get_cell cfg (int i + 1))
+          (ns ! i)))"
+
+(* -----------------------------------------------------------------------
+   Soundness: verify_step accepts only correct transitions.
+   If verify_step cfg ns holds, then ns = next_gen cfg.
+   ----------------------------------------------------------------------- *)
+
+theorem verify_step_sound:
+  assumes "verify_step cfg ns"
+  shows   "ns = next_gen cfg"
+proof (rule nth_equalityI)
+  (* First show the lengths match. *)
+  show "length ns = length (next_gen cfg)"
+    using assms by (simp add: verify_step_def)
+next
+  (* Then show each element matches. *)
+  fix i
+  assume hi: "i < length ns"
+  have hlen: "length ns = length (cells cfg)"
+    using assms by (simp add: verify_step_def)
+  have hi': "i < length (cells cfg)"
+    using hi hlen by simp
+  (* From verify_step, each cell satisfies verify_cell. *)
+  have vcell: "verify_cell
+                 (get_cell cfg (int i - 1))
+                 (get_cell cfg (int i))
+                 (get_cell cfg (int i + 1))
+                 (ns ! i)"
+    using assms hi' by (simp add: verify_step_def)
+  (* verify_cell unfolds to the lookup table. *)
+  have "ns ! i = rule110_lookup (encode_neighborhood
+                   (get_cell cfg (int i - 1))
+                   (get_cell cfg (int i))
+                   (get_cell cfg (int i + 1)))"
+    using vcell by (simp add: verify_cell_def)
+  (* next_gen computes the same thing. *)
+  also have "... = next_gen cfg ! i"
+    using hi' by (simp add: next_gen_def next_cell_def neighborhood_def)
+  finally show "ns ! i = next_gen cfg ! i" .
+qed
+
+(* -----------------------------------------------------------------------
+   Completeness: next_gen always passes verify_step.
+   The verifier accepts every transition that actually IS a Rule 110 step.
+   ----------------------------------------------------------------------- *)
+
+theorem verify_step_complete:
+  "verify_step cfg (next_gen cfg)"
+proof (simp add: verify_step_def verify_cell_def, intro allI impI)
+  fix i
+  assume hi: "i < length (cells cfg)"
+  show "rule110_lookup (encode_neighborhood
+          (get_cell cfg (int i - 1))
+          (get_cell cfg (int i))
+          (get_cell cfg (int i + 1))) =
+        next_gen cfg ! i"
+    using hi by (simp add: next_gen_def next_cell_def neighborhood_def)
+qed
+
+(* ========================================================================
+   Section 6 — Key properties of Rule 110
+   ======================================================================== *)
+
+section ‹Key properties›
+
+(* The all-zeros row is a fixed point under Rule 110.
+   Neighborhood 000 → 0, so a uniform-false row stays uniform-false. *)
+lemma all_zeros_fixed_point:
+  assumes "cells cfg = replicate n False"
+      and "left_boundary cfg = False"
+      and "right_boundary cfg = False"
+  shows   "next_gen cfg = replicate n False"
+proof (rule nth_equalityI)
+  show "length (next_gen cfg) = length (replicate n False)"
+    using assms(1) by simp
+next
+  fix i
+  assume hi: "i < length (next_gen cfg)"
+  have hi': "i < n" using hi assms(1) by simp
+  (* Each neighbor is False — case split handles the boundary positions *)
+  have hleft: "get_cell cfg (int i - 1) = False"
+    by (cases i) (simp_all add: get_cell_def assms)
+  have hcenter: "get_cell cfg (int i) = False"
+    using hi' by (simp add: get_cell_def assms)
+  have hright: "get_cell cfg (int i + 1) = False"
+    using hi' by (simp add: get_cell_def assms)
+  (* Neighborhood of an all-False cell is 0 *)
+  have hneigh: "neighborhood cfg (int i) = 0"
+    by (simp add: neighborhood_def encode_neighborhood_def hleft hcenter hright)
+  (* rule110_lookup 0 = False *)
+show "next_gen cfg ! i = replicate n False ! i"
+  proof -
+    have "next_gen cfg ! i = next_cell cfg (int i)"
+      using hi' assms(1) by (simp add: next_gen_nth)
+    also have "... = False"
+      by (simp add: next_cell_def hneigh rule110_lookup_def)
+    also have "... = replicate n False ! i"
+      using hi' by simp
+    finally show ?thesis .
+  qed
+qed
+
+(* ========================================================================
+   Section 7 — Connection to the Solana program
+   ======================================================================== *)
+
+section ‹Connection to the Solana implementation›
+
+(* The Rust `process_evolve` function follows this pattern:
+     1. next_cells = state.compute_next()          ↔  next_gen cfg
+     2. state.verify_transition(next_cells)        ↔  verify_step cfg ns
+     3. if Ok(()), commit next_cells               ↔  step cfg
+
+   The soundness theorem guarantees that step 2 only passes when
+   step 1 produced a correct Rule 110 transition:
+
+     verify_step cfg ns → ns = next_gen cfg
+
+   So the committed state is always the unique correct successor.
+   No invalid transition can pass verify_transition and be committed. *)
+
+(* Formally: the Solana program's state after one evolve instruction
+   is equal to step applied to the previous configuration. *)
+theorem solana_evolve_correct:
+  assumes "verify_step cfg ns"
+  shows   "ns = cells (step cfg)"
+  using verify_step_sound[OF assms]
+  by (simp add: step_def)
+
+end

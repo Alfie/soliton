@@ -1,0 +1,21 @@
+# Rust / Cargo
+target/
+Cargo.lock
+
+# Anchor
+.anchor/
+
+# Solana keypairs & account snapshots
+*-keypair.json
+state-account.json
+
+# Node / frontend
+rule110-frontend/node_modules/
+rule110-frontend/dist/
+rule110-frontend/elm-stuff/
+
+# macOS
+.DS_Store
+
+# Editor
+.obsidian/

@@ -4,20 +4,19 @@ port module Ports exposing (..)
    Ports.elm — Elm side of the Solana Kit JS interop bridge
 
    Convention:
-     - toJs  : Elm → JS commands  (outgoing)
-     - fromJs : JS → Elm messages (incoming)
+     - outgoing : Elm → JS commands
+     - incoming : JS → Elm messages
 
    Flow:
-     1. User clicks "Connect Wallet"  → connectWallet
-     2. JS resolves wallet            → walletConnected
-     3. User clicks "Initialize"      → sendInitialize
-     4. User clicks "Delegate"        → sendDelegate  (opens ER session)
-     5. User clicks "Evolve"          → sendEvolveER  (hits ER RPC, fast)
-     6. WS account change fires       → accountUpdated (new row of cells)
-     7. User clicks "End Session"     → sendUndelegate (commits + settles)
-
-   Legacy:
-     sendEvolve still exists for base-layer evolve (pre-delegation fallback)
+     1. User clicks "Connect Wallet"       → connectWallet
+     2. JS resolves wallet + reads history → walletConnected, historyLoaded
+     3. JS opens WS subscription           → accountUpdated (per generation)
+     4. User clicks "Evolve"               → sendEvolve
+     5. JS sends tx, waits confirm         → txConfirmed / txFailed
+     6. User clicks "Delegate ER"          → sendDelegate
+     7. User clicks "Evolve ER"            → sendEvolveER
+     8. User clicks "End Session"          → sendUndelegate
+     9. ER session state changes           → sessionStateChanged
 -}
 
 
@@ -25,57 +24,51 @@ port module Ports exposing (..)
 -- Outgoing (Elm → JS)
 -- =========================================================
 
-{- Request wallet connection via browser wallet adapter -}
 port connectWallet : () -> Cmd msg
 
-{- Send the Rule 110 initialize instruction on-chain. -}
 port sendInitialize : () -> Cmd msg
 
-{- Send the Rule 110 evolve instruction on base layer (legacy / fallback). -}
 port sendEvolve : String -> Cmd msg
 
-{- Delegate the CA state PDA to the ER — opens a real-time session. -}
-port sendDelegate : () -> Cmd msg
-
-{- Send an evolve instruction to the Ephemeral Rollup (fast path). -}
-port sendEvolveER : () -> Cmd msg
-
-{- Commit and undelegate — settles final ER state back to base layer. -}
-port sendUndelegate : () -> Cmd msg
-
-{- Subscribe to account change notifications over WebSocket.
-   Payload: base58 public key to watch. -}
 port subscribeToAccount : String -> Cmd msg
 
-{- Unsubscribe from account notifications (e.g. on page leave) -}
 port unsubscribeFromAccount : String -> Cmd msg
+
+port sendDelegate : () -> Cmd msg
+
+port sendEvolveER : () -> Cmd msg
+
+port sendUndelegate : () -> Cmd msg
+
+{- Set a neighbor link.
+   Payload: { side : Int, neighbor : Maybe String }
+   side 0 = left, side 1 = right
+   neighbor = Nothing clears the link -}
+port sendSetNeighbor : { side : Int, neighbor : Maybe String } -> Cmd msg
 
 
 -- =========================================================
 -- Incoming (JS → Elm)
 -- =========================================================
 
-{- Wallet connected successfully.
-   Payload: base58 public key of the connected wallet. -}
 port walletConnected : (String -> msg) -> Sub msg
 
-{- Wallet connection failed or rejected.
-   Payload: error message string. -}
 port walletError : (String -> msg) -> Sub msg
 
-{- Transaction confirmed on-chain.
-   Payload: transaction signature (base58). -}
 port txConfirmed : (String -> msg) -> Sub msg
 
-{- Transaction failed.
-   Payload: error message string. -}
 port txFailed : (String -> msg) -> Sub msg
 
-{- Account data changed — a new generation is available.
-   Payload: list of bools representing the new cell row.
-   JS decodes the raw account bytes before sending. -}
+{- A single new generation row, arriving live via WS. -}
 port accountUpdated : (List Bool -> msg) -> Sub msg
 
-{- Session state changed — JS notifies Elm whether a delegation session
-   is currently active. Payload: true = delegated, false = undelegated. -}
+{- Full history loaded on wallet connect.
+   Payload: list of rows, oldest first, each row a List Bool.
+   Use this to paint the spacetime diagram on initial load
+   rather than waiting for the first WS notification. -}
+port historyLoaded : (List (List Bool) -> msg) -> Sub msg
+
+{- ER session state changed.
+   True  = session active (account delegated to ER).
+   False = session ended (account back on base layer). -}
 port sessionStateChanged : (Bool -> msg) -> Sub msg

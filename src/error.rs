@@ -11,6 +11,12 @@ pub enum Rule110Error {
     #[msg("Rule 110 transition verification failed")]
     VerificationFailed,
 
-    #[msg("Generations must be at least 1")]
+    #[msg("generations must be >= 1")]
     InvalidGenerations,
+
+    #[msg("side must be 0 (left) or 1 (right)")]
+    InvalidSide,
+
+    #[msg("A neighbor pubkey is set but the neighbor account was not passed in remaining_accounts")]
+    MissingNeighborAccount,
 }

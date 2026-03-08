@@ -27,6 +27,8 @@ let lastDrawnGeneration = 0
  */
 export function drawGenerations(canvas, generations) {
   if (!canvas || generations.length === 0) return
+  console.log('drawGenerations called:', canvas?.id, generations.length, 'rows')
+  if (!canvas || generations.length === 0) return
 
   const ctx = canvas.getContext('2d')
 

@@ -1,10 +1,15 @@
 import { defineConfig } from 'vite'
 import elm from 'vite-plugin-elm'
+import { nodePolyfills } from 'vite-plugin-node-polyfills'
 
 export default defineConfig({
   plugins: [
     elm({
       optimize: false,  // set true for production builds
+    }),
+    nodePolyfills({
+      include: ['buffer'],
+      globals: { Buffer: true },
     }),
   ],
 

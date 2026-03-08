@@ -1,28 +1,27 @@
 module Main exposing (main)
 
 {-
-   Main.elm — Rule 110 on-chain demo
+   Main.elm — Rule 110 on-chain cellular automaton
 
    Architecture:
-     - Model holds wallet state, tx state, session state, and the growing grid of cell rows
+     - Model holds wallet state, tx state, ER session state,
+       and the growing spacetime diagram (list of cell rows)
      - Update handles port messages and user interactions
-     - View renders wallet controls + triggers canvas rendering via port
-     - Canvas drawing is handled on the JS side (see solana-bridge.js)
+     - View branches on session state:
+         base layer → Initialize / Evolve / Delegate ER
+         ER session → Evolve ER ⚡ / End Session
+     - Canvas drawing is handled on the JS side (canvas.js)
 
    Spacetime diagram:
-     - Each confirmed on-chain step appends a new row to `generations`
+     - On wallet connect, historyLoaded paints all stored rows at once
+     - accountUpdated appends one row at a time as WS notifications arrive
      - Rows are List Bool, oldest at head, newest at tail
-     - JS renders the full grid to canvas whenever `generations` changes
-
-   Session model:
-     - Delegated = False  → base layer, user can Initialize or Delegate
-     - Delegated = True   → ER session active, any wallet can Evolve ER or End Session
 -}
 
 import Browser
-import Html exposing (Html, button, div, p, span, text)
-import Html.Attributes exposing (class, disabled)
-import Html.Events exposing (onClick)
+import Html exposing (Html, button, div, input, p, span, text)
+import Html.Attributes exposing (class, disabled, placeholder, value)
+import Html.Events exposing (onClick, onInput)
 import Ports
 
 
@@ -44,13 +43,14 @@ main =
 -- Constants
 -- ================================================================
 
-{- Base58 address of the on-chain game state account. -}
 stateAccount : String
 stateAccount =
-    "Hy3kXRXV8SnJE5kUfu9VArGAX2Tobk9McH8WfEVQfB8n"
+    "YOUR_STATE_ACCOUNT_ADDRESS_HERE"
 
 {- Maximum number of generations to keep in memory.
-   Older rows are dropped to avoid unbounded growth. -}
+   Older rows are dropped to avoid unbounded growth.
+   Set to 2× HISTORY_LEN so we always have room for a full
+   on-chain history plus live rows accumulated in-session. -}
 maxGenerations : Int
 maxGenerations =
     200
@@ -63,35 +63,37 @@ maxGenerations =
 type WalletState
     = Disconnected
     | Connecting
-    | Connected String   -- holds the wallet's public key
+    | Connected String
 
 
 type TxState
     = Idle
-    | Initializing       -- Initialize tx submitted
-    | Delegating         -- Delegate tx submitted
-    | Pending            -- Evolve tx submitted, awaiting confirmation
-    | Undelegating       -- Undelegate tx submitted
-    | Confirmed String   -- holds the tx signature
-    | Failed String      -- holds the error message
+    | Initializing
+    | Pending
+    | Delegating
+    | Undelegating
+    | Confirmed String
+    | Failed String
 
 
 type alias Model =
-    { wallet      : WalletState
-    , tx          : TxState
-    , generations : List (List Bool)  -- spacetime diagram rows, oldest first
-    , subscribed  : Bool
-    , delegated   : Bool              -- True when an ER session is active
+    { wallet        : WalletState
+    , tx            : TxState
+    , delegated     : Bool              -- True when account is in an ER session
+    , generations   : List (List Bool)  -- spacetime diagram rows, oldest first
+    , subscribed    : Bool
+    , neighborInput : String            -- text field for set_neighbor address
     }
 
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( { wallet      = Disconnected
-      , tx          = Idle
-      , generations = []
-      , subscribed  = False
-      , delegated   = False
+    ( { wallet        = Disconnected
+      , tx            = Idle
+      , delegated     = False
+      , generations   = []
+      , subscribed    = False
+      , neighborInput = ""
       }
     , Cmd.none
     )
@@ -121,8 +123,16 @@ type Msg
     -- Account subscription
     | AccountUpdated (List Bool)
 
-    -- Session state from JS
+    -- History loaded on connect
+    | HistoryLoaded (List (List Bool))
+
+    -- ER session state
     | SessionStateChanged Bool
+
+    -- Neighbor wiring
+    | NeighborInputChanged String
+    | UserClickedSetNeighbor Int   -- 0 = left, 1 = right
+    | UserClickedClearNeighbor Int
 
 
 -- ================================================================
@@ -133,77 +143,56 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
 
-        -- --------------------------------------------------------
-        -- User clicks "Connect Wallet"
-        -- --------------------------------------------------------
         UserClickedConnect ->
             ( { model | wallet = Connecting }
             , Ports.connectWallet ()
             )
 
-        -- --------------------------------------------------------
-        -- User clicks "Initialize" — create the on-chain account
-        -- --------------------------------------------------------
         UserClickedInitialize ->
             case model.wallet of
                 Connected _ ->
                     ( { model | tx = Initializing }
                     , Ports.sendInitialize ()
                     )
-
                 _ ->
                     ( model, Cmd.none )
 
-        -- --------------------------------------------------------
-        -- User clicks "Evolve" — base layer fallback
-        -- --------------------------------------------------------
         UserClickedEvolve ->
             case model.wallet of
                 Connected _ ->
                     ( { model | tx = Pending }
                     , Ports.sendEvolve stateAccount
                     )
-
                 _ ->
                     ( model, Cmd.none )
 
-        -- --------------------------------------------------------
-        -- User clicks "Delegate" — open an ER session
-        -- --------------------------------------------------------
         UserClickedDelegate ->
             case model.wallet of
                 Connected _ ->
                     ( { model | tx = Delegating }
                     , Ports.sendDelegate ()
                     )
-
                 _ ->
                     ( model, Cmd.none )
 
-        -- --------------------------------------------------------
-        -- User clicks "Evolve ER" — fast path via Ephemeral Rollup
-        -- --------------------------------------------------------
         UserClickedEvolveER ->
-            ( { model | tx = Pending }
-            , Ports.sendEvolveER ()
-            )
+            case model.wallet of
+                Connected _ ->
+                    ( { model | tx = Pending }
+                    , Ports.sendEvolveER ()
+                    )
+                _ ->
+                    ( model, Cmd.none )
 
-        -- --------------------------------------------------------
-        -- User clicks "End Session" — commit + undelegate
-        -- --------------------------------------------------------
         UserClickedUndelegate ->
             case model.wallet of
                 Connected _ ->
                     ( { model | tx = Undelegating }
                     , Ports.sendUndelegate ()
                     )
-
                 _ ->
                     ( model, Cmd.none )
 
-        -- --------------------------------------------------------
-        -- Wallet connected successfully
-        -- --------------------------------------------------------
         WalletConnected pubkey ->
             let
                 subCmd =
@@ -219,35 +208,22 @@ update msg model =
             , subCmd
             )
 
-        -- --------------------------------------------------------
-        -- Wallet connection failed
-        -- --------------------------------------------------------
         WalletError err ->
             ( { model | wallet = Disconnected, tx = Failed err }
             , Cmd.none
             )
 
-        -- --------------------------------------------------------
-        -- Transaction confirmed — clear pending state
-        -- The new row will arrive via AccountUpdated
-        -- --------------------------------------------------------
         TxConfirmed sig ->
             ( { model | tx = Confirmed sig }
             , Cmd.none
             )
 
-        -- --------------------------------------------------------
-        -- Transaction failed
-        -- --------------------------------------------------------
         TxFailed err ->
             ( { model | tx = Failed err }
             , Cmd.none
             )
 
-        -- --------------------------------------------------------
-        -- New generation received from WS account subscription
-        -- Append to the spacetime diagram, capping at maxGenerations
-        -- --------------------------------------------------------
+        -- Single new row arriving via WS — append to diagram
         AccountUpdated row ->
             let
                 newGenerations =
@@ -267,19 +243,47 @@ update msg model =
             , Cmd.none
             )
 
-        -- --------------------------------------------------------
-        -- JS notifies Elm that delegation session state changed
-        -- --------------------------------------------------------
-        SessionStateChanged isDelegated ->
+        -- Full history arriving on wallet connect — replace diagram
+        HistoryLoaded rows ->
+            ( { model | generations = dropOldest rows }
+            , Cmd.none
+            )
+
+        -- ER session state restored (e.g. after page refresh while delegated)
+        -- or changed by delegate / undelegate transactions
+        SessionStateChanged active ->
+            let
+                newTx =
+                    case model.tx of
+                        Delegating   -> if active then Idle else model.tx
+                        Undelegating -> if not active then Idle else model.tx
+                        _            -> model.tx
+            in
             ( { model
-                | delegated = isDelegated
-                , tx        = Idle
+                | delegated = active
+                , tx        = newTx
               }
             , Cmd.none
             )
 
+        NeighborInputChanged s ->
+            ( { model | neighborInput = s }, Cmd.none )
 
-{- Drop rows from the front once we exceed maxGenerations -}
+        UserClickedSetNeighbor side ->
+            if String.isEmpty model.neighborInput then
+                ( model, Cmd.none )
+            else
+                ( { model | tx = Pending }
+                , Ports.sendSetNeighbor
+                    { side = side, neighbor = Just model.neighborInput }
+                )
+
+        UserClickedClearNeighbor side ->
+            ( { model | tx = Pending }
+            , Ports.sendSetNeighbor { side = side, neighbor = Nothing }
+            )
+
+
 dropOldest : List (List Bool) -> List (List Bool)
 dropOldest rows =
     let
@@ -303,6 +307,7 @@ subscriptions _ =
         , Ports.txConfirmed        TxConfirmed
         , Ports.txFailed           TxFailed
         , Ports.accountUpdated     AccountUpdated
+        , Ports.historyLoaded      HistoryLoaded
         , Ports.sessionStateChanged SessionStateChanged
         ]
 
@@ -317,8 +322,8 @@ view model =
         [ viewHeader
         , viewWalletPanel model
         , viewControls model
+        , viewNeighborPanel model
         , viewTxStatus model
-        , viewCanvas
         ]
 
 
@@ -341,8 +346,13 @@ viewWalletPanel model =
                     [ text "Connecting…" ]
 
             Connected pubkey ->
-                span [ class "pubkey" ]
-                    [ text (abbreviate pubkey) ]
+                div [ class "wallet-info" ]
+                    [ span [ class "pubkey" ] [ text (abbreviate pubkey) ]
+                    , if model.delegated then
+                        span [ class "er-badge" ] [ text "● ER session active" ]
+                      else
+                        text ""
+                    ]
         ]
 
 
@@ -354,66 +364,113 @@ viewControls model =
                 Connected _ -> True
                 _           -> False
 
-        isFree =
+        isIdle =
             case model.tx of
                 Idle        -> True
                 Confirmed _ -> True
                 _           -> False
 
-        canAct =
-            isConnected && isFree
+        canAct = isConnected && isIdle
     in
     div [ class "controls" ]
-        ( if model.delegated then
-            -- ER session active — show ER evolve + end session
-            [ button
-                [ onClick UserClickedEvolveER
-                , disabled (not isFree)
-                , class "btn-evolve-er"
+        [ if model.delegated then
+            -- ER session active
+            div [ class "er-controls" ]
+                [ button
+                    [ onClick UserClickedEvolveER
+                    , disabled (not canAct)
+                    ]
+                    [ text "Evolve ER ⚡" ]
+                , button
+                    [ onClick UserClickedUndelegate
+                    , disabled (not canAct)
+                    , class "secondary"
+                    ]
+                    [ text "End Session" ]
                 ]
-                [ text "Evolve ER ⚡" ]
-            , button
-                [ onClick UserClickedUndelegate
-                , disabled (not canAct)
-                , class "btn-end-session"
-                ]
-                [ text "End Session" ]
-            , span [ class "session-badge" ]
-                [ text "● ER session active" ]
-            , span [ class "generation-count" ]
-                [ text
-                    ( String.fromInt (List.length model.generations)
-                        ++ " generations"
-                    )
-                ]
-            ]
-
           else
-            -- Base layer — show initialize, evolve, delegate
-            [ button
-                [ onClick UserClickedInitialize
-                , disabled (not canAct)
+            -- Base layer
+            div [ class "base-controls" ]
+                [ button
+                    [ onClick UserClickedInitialize
+                    , disabled (not canAct)
+                    ]
+                    [ text "Initialize" ]
+                , button
+                    [ onClick UserClickedEvolve
+                    , disabled (not canAct)
+                    ]
+                    [ text "Evolve →" ]
+                , button
+                    [ onClick UserClickedDelegate
+                    , disabled (not canAct)
+                    , class "secondary"
+                    ]
+                    [ text "Delegate ER" ]
                 ]
-                [ text "Initialize" ]
-            , button
-                [ onClick UserClickedEvolve
-                , disabled (not canAct)
-                ]
-                [ text "Evolve →" ]
-            , button
-                [ onClick UserClickedDelegate
-                , disabled (not canAct)
-                , class "btn-delegate"
-                ]
-                [ text "Delegate ER" ]
-            , span [ class "generation-count" ]
-                [ text
-                    ( String.fromInt (List.length model.generations)
-                        ++ " generations"
-                    )
-                ]
+        , span [ class "generation-count" ]
+            [ text
+                (String.fromInt (List.length model.generations)
+                    ++ " generations"
+                )
             ]
-        )
+        ]
+
+
+viewNeighborPanel : Model -> Html Msg
+viewNeighborPanel model =
+    let
+        isConnected =
+            case model.wallet of
+                Connected _ -> True
+                _           -> False
+
+        isIdle =
+            case model.tx of
+                Idle        -> True
+                Confirmed _ -> True
+                _           -> False
+
+        canAct = isConnected && isIdle
+    in
+    div [ class "neighbor-panel" ]
+        [ p [ class "neighbor-label" ] [ text "Neighbor wiring" ]
+        , div [ class "neighbor-input-row" ]
+            [ input
+                [ placeholder "neighbor tile address"
+                , value model.neighborInput
+                , onInput NeighborInputChanged
+                , class "neighbor-input"
+                ]
+                []
+            , button
+                [ onClick (UserClickedSetNeighbor 0)
+                , disabled (not canAct || String.isEmpty model.neighborInput)
+                , class "secondary small"
+                ]
+                [ text "Set Left" ]
+            , button
+                [ onClick (UserClickedSetNeighbor 1)
+                , disabled (not canAct || String.isEmpty model.neighborInput)
+                , class "secondary small"
+                ]
+                [ text "Set Right" ]
+            ]
+        , div [ class "neighbor-clear-row" ]
+            [ button
+                [ onClick (UserClickedClearNeighbor 0)
+                , disabled (not canAct)
+                , class "secondary small"
+                ]
+                [ text "Clear Left" ]
+            , button
+                [ onClick (UserClickedClearNeighbor 1)
+                , disabled (not canAct)
+                , class "secondary small"
+                ]
+                [ text "Clear Right" ]
+            ]
+        ]
 
 
 viewTxStatus : Model -> Html Msg
@@ -426,14 +483,14 @@ viewTxStatus model =
             Initializing ->
                 span [ class "pending" ] [ text "Initializing account…" ]
 
-            Delegating ->
-                span [ class "pending" ] [ text "Opening ER session…" ]
-
             Pending ->
                 span [ class "pending" ] [ text "Transaction pending…" ]
 
+            Delegating ->
+                span [ class "pending" ] [ text "Opening ER session…" ]
+
             Undelegating ->
-                span [ class "pending" ] [ text "Settling to base layer…" ]
+                span [ class "pending" ] [ text "Ending session, settling to chain…" ]
 
             Confirmed sig ->
                 span [ class "confirmed" ]
@@ -445,26 +502,11 @@ viewTxStatus model =
         ]
 
 
-{- Canvas element wrapped for the scanline CSS overlay.
-   JS draws the spacetime diagram into the inner canvas.
-   The wrapper div provides the ::after scanline pseudo-element. -}
-viewCanvas : Html Msg
-viewCanvas =
-    div [ class "canvas-wrapper" ]
-        [ Html.node "canvas"
-            [ Html.Attributes.id "rule110-canvas"
-            , Html.Attributes.attribute "width" "640"
-            , Html.Attributes.attribute "height" "640"
-            ]
-            []
-        ]
-
 
 -- ================================================================
 -- Helpers
 -- ================================================================
 
-{- Shorten a long base58 string for display: "AbCd…XyZ1" -}
 abbreviate : String -> String
 abbreviate s =
     if String.length s <= 12 then

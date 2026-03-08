@@ -1,5 +1,7 @@
 # Rule 110 — on-chain
 
+[demo video](https://share.descript.com/view/sblQSojhRyR)
+
 A formally verified cellular automaton running on Solana, with real-time ephemeral rollup sessions and an Elm frontend.
 
 Each cell transition is deterministically computed on-chain. The state space is tiled across multiple accounts with live boundary exchange. The spacetime diagram renders in the browser as generations accumulate.
